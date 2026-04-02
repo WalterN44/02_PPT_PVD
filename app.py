@@ -2,18 +2,19 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Configuración de página
+# 1. Configuración de página
 st.set_page_config(layout="wide", page_title="Reporte PVD 2026")
 
 @st.cache_data
 def load_data():
-    # Intentamos leer con coma, si falla probamos con punto y coma
+    # Esta configuración detecta automáticamente si usas coma (,) o punto y coma (;)
     try:
         df = pd.read_csv("data.csv", sep=None, engine='python', encoding='utf-8')
-    except:
-        df = pd.read_csv("data.csv", sep=',', encoding='latin-1')
+    except Exception:
+        # Si falla por caracteres especiales (tildes), intenta con este formato:
+        df = pd.read_csv("data.csv", sep=None, engine='python', encoding='latin-1')
     
-    # ESTO ES LO MÁS IMPORTANTE: Limpia espacios en blanco en los nombres de las columnas
+    # Limpieza de espacios en los nombres de las columnas
     df.columns = df.columns.str.strip()
     return df
 
@@ -23,47 +24,51 @@ try:
     st.title("📊 Dashboard de Ejecución Presupuestal 2026")
 
     # --- FILTROS ---
-    # Usamos .get() o verificamos si la columna existe para evitar el error que te salió
-    if 'FF' in df.columns and 'GASTO' in df.columns:
+    # Verificamos que las columnas existan
+    columnas = list(df.columns)
+    
+    if 'FF' in columnas and 'GASTO' in columnas:
         col1, col2 = st.columns(2)
         with col1:
-            ff_options = df['FF'].unique()
-            ff_selected = st.multiselect("Fuente de Financiamiento (FF):", options=ff_options, default=ff_options)
+            fuentes = df['FF'].unique()
+            ff_sel = st.multiselect("Fuente de Financiamiento (FF):", options=fuentes, default=fuentes)
         with col2:
-            gasto_options = df['GASTO'].unique()
-            gasto_selected = st.radio("Tipo de Gasto:", options=gasto_options, horizontal=True)
+            gastos = df['GASTO'].unique()
+            gasto_sel = st.radio("Tipo de Gasto:", options=gastos, horizontal=True)
 
-        # Filtrado
-        df_filtered = df[(df['FF'].isin(ff_selected)) & (df['GASTO'] == gasto_selected)]
+        # Aplicar filtros
+        df_f = df[(df['FF'].isin(ff_sel)) & (df['GASTO'] == gasto_sel)]
 
         # --- KPIs ---
-        # Aseguramos que los nombres coincidan con tu Excel
-        pim = df_filtered['PIM'].sum()
-        dev = df_filtered['DEVENGADO'].sum()
-        cert = df_filtered['CERTIFICADO'].sum()
-        comp = df_filtered['COMPROMISO'].sum()
+        # Usamos nombres exactos de tu archivo
+        pim = df_f['PIM'].sum()
+        dev = df_f['DEVENGADO'].sum()
+        cert = df_f['CERTIFICADO'].sum()
+        comp = df_f['COMPROMISO'].sum()
 
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("PIM Total", f"S/ {pim:,.2f}")
-        k2.metric("Devengado/PIM", f"{(dev/pim)*100:.1f}%" if pim > 0 else "0%")
-        k3.metric("Certificado/PIM", f"{(cert/pim)*100:.1f}%" if pim > 0 else "0%")
-        k4.metric("Compromiso/PIM", f"{(comp/pim)*100:.1f}%" if pim > 0 else "0%")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("PIM Total", f"S/ {pim:,.2f}")
+        m2.metric("Devengado/PIM", f"{(dev/pim)*100:.1f}%" if pim > 0 else "0%")
+        m3.metric("Certificado/PIM", f"{(cert/pim)*100:.1f}%" if pim > 0 else "0%")
+        m4.metric("Compromiso/PIM", f"{(comp/pim)*100:.1f}%" if pim > 0 else "0%")
 
-        # --- GRÁFICO ---
+        st.divider()
+
+        # --- GRÁFICO DE BARRAS ---
         meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SETIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
-        prog_cols = [f"PROG. {m}" for m in meses]
-        
-        # Verificar cuáles de estas columnas existen realmente en el CSV
-        prog_cols_present = [c for c in prog_cols if c in df_filtered.columns]
-        
-        if prog_cols_present:
-            valores_mes = [df_filtered[c].sum() for c in prog_cols_present]
-            df_grafico = pd.DataFrame({"Mes": [c.replace("PROG. ", "") for c in prog_cols_present], "Monto": valores_mes})
+        # Creamos la lista de columnas de programación que sí existen en el archivo
+        prog_cols = [f"PROG. {m}" for m in meses if f"PROG. {m}" in columnas]
+
+        if prog_cols:
+            valores = [df_f[c].sum() for c in prog_cols]
+            nombres_meses = [c.replace("PROG. ", "") for c in prog_cols]
             
-            fig = px.bar(df_grafico, x="Mes", y="Monto", title="Programación por Mes", color_discrete_sequence=['#0083B8'])
+            df_barras = pd.DataFrame({"Mes": nombres_meses, "Monto": valores})
+            fig = px.bar(df_barras, x="Mes", y="Monto", title=f"Programación Mensual: {gasto_sel}", 
+                         color_discrete_sequence=['#00D4FF'], text_auto='.2s')
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error(f"No encontré las columnas 'FF' o 'GASTO'. Columnas detectadas: {list(df.columns)}")
+        st.warning(f"Revisa los títulos de tu Excel. Columnas encontradas: {columnas}")
 
 except Exception as e:
-    st.error(f"Ocurrió un error: {e}")
+    st.error(f"Error crítico: {e}")
