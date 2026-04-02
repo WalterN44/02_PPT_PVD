@@ -6,19 +6,37 @@ import plotly.graph_objects as go
 st.set_page_config(layout="wide", page_title="Reporte PVD 2026")
 
 # ---------------------------
-# DATA
+# CARGA DE DATA (ROBUSTA)
 # ---------------------------
-RAW = [...]  # 👈 pega aquí tu JSON completo (sin cambiar nada)
+@st.cache_data
+def load_data():
+    try:
+        df = pd.read_csv("data.csv", encoding="utf-8")
+    except:
+        df = pd.read_csv("data.csv", encoding="latin-1")
 
-df = pd.DataFrame(RAW)
+    # 🔥 FIX ERROR strip
+    df.columns = df.columns.str.strip()
+
+    # limpiar strings
+    for col in df.select_dtypes(include="object"):
+        df[col] = df[col].astype(str).str.strip()
+
+    # convertir numéricos
+    for col in df.columns:
+        if col not in ["GASTO", "NATURALEZA", "FF"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    return df
+
+df = load_data()
 
 MESES = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SETIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
 
 # ---------------------------
-# HELPERS
+# FORMATOS
 # ---------------------------
 def fmt(n):
-    if pd.isna(n): return "0"
     if abs(n) >= 1e9: return f"{n/1e9:.2f} MM"
     if abs(n) >= 1e6: return f"{n/1e6:.1f} M"
     if abs(n) >= 1e3: return f"{n/1e3:.1f} K"
@@ -38,11 +56,16 @@ def gauge(value, total, title, color):
         gauge={
             'axis': {'range': [0, 100]},
             'bar': {'color': color},
-            'bgcolor': "#1e293b"
         }
     ))
-    fig.update_layout(height=250, margin=dict(l=10,r=10,t=40,b=10))
+    fig.update_layout(height=220, margin=dict(l=10,r=10,t=40,b=10))
     return fig
+
+# ---------------------------
+# HEADER
+# ---------------------------
+st.markdown("## 📊 REPORTE PVD — 2026")
+st.caption("Provías Descentralizado · Ejecución de Inversiones y Gasto Corriente")
 
 # ---------------------------
 # FILTROS
@@ -50,10 +73,10 @@ def gauge(value, total, title, color):
 col1, col2 = st.columns(2)
 
 with col1:
-    gasto_filter = st.selectbox("Tipo de Gasto", ["TODO", "INVERSIÓN", "GASTO CORRIENTE"])
+    gasto_filter = st.radio("Tipo de Gasto", ["TODO", "INVERSIÓN", "GASTO CORRIENTE"], horizontal=True)
 
 with col2:
-    ff_filter = st.selectbox("Fuente", ["TODO", "RO", "ROOC"])
+    ff_filter = st.radio("Fuente", ["TODO", "RO", "ROOC"], horizontal=True)
 
 filtered = df.copy()
 
@@ -74,15 +97,12 @@ totals = {
     "CERTIFICADO": filtered["CERTIFICADO"].sum(),
     "COMPROMISO": filtered["COMPROMISO"].sum(),
     "DEVENGADO": filtered["DEVENGADO"].sum(),
-    "TOTAL_PROG": filtered["TOTAL_PROG."].sum()
+    "PROGRAMADO": filtered["TOTAL_PROG."].sum()
 }
 
-st.title("📊 REPORTE PVD — 2026")
-st.caption("Provías Descentralizado · Ejecución")
+cols = st.columns(6)
 
-kpi_cols = st.columns(6)
-
-for col, (k, v) in zip(kpi_cols, totals.items()):
+for col, (k, v) in zip(cols, totals.items()):
     col.metric(k, fmt(v), fmt_full(v))
 
 # ---------------------------
@@ -90,41 +110,39 @@ for col, (k, v) in zip(kpi_cols, totals.items()):
 # ---------------------------
 col1, col2 = st.columns(2)
 
-# Fuente
-pim_by_ff = filtered.groupby("FF")["PIM"].sum()
+pim_ff = filtered.groupby("FF")["PIM"].sum()
 
-fig_ff = go.Figure(data=[go.Pie(
-    labels=pim_by_ff.index,
-    values=pim_by_ff.values,
-    hole=0.6
+fig1 = go.Figure(data=[go.Pie(
+    labels=pim_ff.index,
+    values=pim_ff.values,
+    hole=0.65
 )])
-fig_ff.update_layout(title="Fuente de Financiamiento")
+fig1.update_layout(title="Fuente de Financiamiento")
 
-col1.plotly_chart(fig_ff, use_container_width=True)
+col1.plotly_chart(fig1, use_container_width=True)
 
-# Tipo gasto
-pim_by_gasto = filtered.groupby("GASTO")["PIM"].sum()
+pim_gasto = filtered.groupby("GASTO")["PIM"].sum()
 
-fig_gasto = go.Figure(data=[go.Pie(
-    labels=pim_by_gasto.index,
-    values=pim_by_gasto.values,
-    hole=0.6
+fig2 = go.Figure(data=[go.Pie(
+    labels=pim_gasto.index,
+    values=pim_gasto.values,
+    hole=0.65
 )])
-fig_gasto.update_layout(title="Tipo de Gasto")
+fig2.update_layout(title="Tipo de Gasto")
 
-col2.plotly_chart(fig_gasto, use_container_width=True)
+col2.plotly_chart(fig2, use_container_width=True)
 
 # ---------------------------
 # GAUGES
 # ---------------------------
-col1, col2, col3 = st.columns(3)
+g1, g2, g3 = st.columns(3)
 
-col1.plotly_chart(gauge(totals["DEVENGADO"], totals["PIM"], "Devengado", "#10b981"))
-col2.plotly_chart(gauge(totals["CERTIFICADO"], totals["PIM"], "Certificado", "#06b6d4"))
-col3.plotly_chart(gauge(totals["COMPROMISO"], totals["PIM"], "Compromiso", "#f59e0b"))
+g1.plotly_chart(gauge(totals["DEVENGADO"], totals["PIM"], "Devengado", "#10b981"))
+g2.plotly_chart(gauge(totals["CERTIFICADO"], totals["PIM"], "Certificado", "#06b6d4"))
+g3.plotly_chart(gauge(totals["COMPROMISO"], totals["PIM"], "Compromiso", "#f59e0b"))
 
 # ---------------------------
-# BAR CHART
+# BARRAS MENSUALES
 # ---------------------------
 prog = []
 dev = []
@@ -134,11 +152,12 @@ for m in MESES:
     dev.append(filtered.get(f"DEV._{m}", 0).sum())
 
 fig_bar = go.Figure()
+
 fig_bar.add_bar(x=MESES, y=prog, name="Programado")
 fig_bar.add_bar(x=MESES, y=dev, name="Devengado")
 
 fig_bar.update_layout(
-    title="Programación vs Ejecución 2026",
+    title="Programación y Ejecución Mensual 2026",
     barmode='group'
 )
 
@@ -160,5 +179,13 @@ grouped["% EJEC"] = np.where(
     0
 )
 
-st.subheader("Ejecución por Línea")
-st.dataframe(grouped.sort_values("PIM", ascending=False), use_container_width=True)
+st.subheader("Ejecución por Línea de Intervención")
+st.dataframe(
+    grouped.sort_values("PIM", ascending=False),
+    use_container_width=True
+)
+
+# ---------------------------
+# FOOTER
+# ---------------------------
+st.caption("Provías Descentralizado — MTC · Dashboard generado con Streamlit")
