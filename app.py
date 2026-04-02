@@ -1,128 +1,164 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 
-# --- CONFIGURACIÓN VISUAL ---
 st.set_page_config(layout="wide", page_title="Reporte PVD 2026")
 
-# CSS para fondo oscuro y tarjetas (Replica tu imagen objetivo)
-st.markdown("""
-    <style>
-    .main { background-color: #0f172a; }
-    [data-testid="stMetricValue"] { color: #3b82f6 !important; font-weight: 800; font-size: 24px; }
-    .stPlotlyChart { background-color: rgba(0,0,0,0); }
-    h1, h2, h3, p { color: white !important; }
-    </style>
-    """, unsafe_allow_html=True)
+# ---------------------------
+# DATA
+# ---------------------------
+RAW = [...]  # 👈 pega aquí tu JSON completo (sin cambiar nada)
 
-@st.cache_data
-def load_data():
-    try:
-        # Cargamos el CSV con encoding flexible
-        df = pd.read_csv("data.csv", encoding='latin-1', sep=None, engine='python')
-        
-        # LIMPIEZA DE COLUMNAS (Forma correcta que no da error de 'strip')
-        df.columns = df.columns.str.strip().str.upper()
-        
-        # LIMPIEZA DE DATOS NUMÉRICOS: Quitar S/, comas y espacios
-        for col in df.columns:
-            if any(x in str(col) for x in ['PIM', 'PIA', 'DEV', 'CERT', 'COMP']):
-                df[col] = df[col].astype(str).str.replace(r'[S/,\s]', '', regex=True)
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        # Limpieza de columnas de texto
-        for col in df.select_dtypes(['object']).columns:
-            df[col] = df[col].astype(str).str.strip()
-            
-        return df
-    except Exception as e:
-        st.error(f"Error al procesar el archivo: {e}")
-        return pd.DataFrame()
+df = pd.DataFrame(RAW)
 
-# --- CARGA DE DATOS ---
-df = load_data()
+MESES = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SETIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
 
-if not df.empty:
-    # Encabezado (Como en tu imagen objetivo)
-    st.markdown("<h1>REPORTE PVD — 2026</h1>", unsafe_allow_html=True)
-    st.caption("Provías Descentralizado - Ejecución de Inversiones y Gasto Corriente")
+# ---------------------------
+# HELPERS
+# ---------------------------
+def fmt(n):
+    if pd.isna(n): return "0"
+    if abs(n) >= 1e9: return f"{n/1e9:.2f} MM"
+    if abs(n) >= 1e6: return f"{n/1e6:.1f} M"
+    if abs(n) >= 1e3: return f"{n/1e3:.1f} K"
+    return f"{n:.0f}"
 
-    # Identificación de columnas
-    c_gasto = next((c for c in df.columns if 'GASTO' in c), None)
-    c_ff = next((c for c in df.columns if 'FF' in c), None)
-    c_pim = next((c for c in df.columns if 'PIM' in c), None)
-    c_dev = next((c for c in df.columns if 'DEV' in c), None)
-    c_cert = next((c for c in df.columns if 'CERT' in c), None)
-    c_comp = next((c for c in df.columns if 'COMP' in c), None)
-    c_pia = next((c for c in df.columns if 'PIA' in c), 'PIM')
+def fmt_full(n):
+    return f"S/ {int(n):,}".replace(",", ".")
 
-    # 1. FILTROS SUPERIORES
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        tipo_gasto = st.radio("TIPO DE GASTO:", ["TODO"] + list(df[c_gasto].unique()), horizontal=True)
-    with col_f2:
-        fuente = st.radio("FUENTE:", ["TODO"] + list(df[c_ff].unique()), horizontal=True)
+def gauge(value, total, title, color):
+    pct = 0 if total == 0 else value / total
 
-    # Filtrar datos
-    dff = df.copy()
-    if tipo_gasto != "TODO": dff = dff[dff[c_gasto] == tipo_gasto]
-    if fuente != "TODO": dff = dff[dff[c_ff] == fuente]
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=pct * 100,
+        number={'suffix': "%"},
+        title={'text': title},
+        gauge={
+            'axis': {'range': [0, 100]},
+            'bar': {'color': color},
+            'bgcolor': "#1e293b"
+        }
+    ))
+    fig.update_layout(height=250, margin=dict(l=10,r=10,t=40,b=10))
+    return fig
 
-    # 2. TARJETAS DE INDICADORES (KPIs)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("PIA", f"{(dff[c_pia].sum()/1e6):.2f} MM")
-    k2.metric("PIM", f"{(dff[c_pim].sum()/1e6):.2f} MM")
-    k3.metric("CERTIFICADO", f"{(dff[c_cert].sum()/1e6):.2f} MM")
-    k4.metric("COMPROMISO", f"{(dff[c_comp].sum()/1e6):.2f} MM")
+# ---------------------------
+# FILTROS
+# ---------------------------
+col1, col2 = st.columns(2)
 
-    st.markdown("---")
+with col1:
+    gasto_filter = st.selectbox("Tipo de Gasto", ["TODO", "INVERSIÓN", "GASTO CORRIENTE"])
 
-    # 3. GRÁFICOS (Donuts y Semicírculos)
-    g1, g2, g3, g4 = st.columns(4)
-    
-    with g1: # Fuente de Financiamiento
-        fig1 = px.pie(dff, values=c_pim, names=c_ff, hole=0.7, color_discrete_sequence=['#3b82f6', '#f59e0b'])
-        fig1.update_layout(showlegend=False, height=200, margin=dict(t=0,b=0,l=0,r=0), paper_bgcolor='rgba(0,0,0,0)')
-        st.markdown("<p style='text-align:center; font-size:12px;'>FUENTE DE FINANCIAMIENTO</p>", unsafe_allow_html=True)
-        st.plotly_chart(fig1, use_container_width=True)
+with col2:
+    ff_filter = st.selectbox("Fuente", ["TODO", "RO", "ROOC"])
 
-    with g2: # Tipo de Gasto
-        fig2 = px.pie(dff, values=c_pim, names=c_gasto, hole=0.7, color_discrete_sequence=['#a855f7', '#06b6d4'])
-        fig2.update_layout(showlegend=False, height=200, margin=dict(t=0,b=0,l=0,r=0), paper_bgcolor='rgba(0,0,0,0)')
-        st.markdown("<p style='text-align:center; font-size:12px;'>TIPO DE GASTO</p>", unsafe_allow_html=True)
-        st.plotly_chart(fig2, use_container_width=True)
+filtered = df.copy()
 
-    with g3: # Devengado %
-        perc = (dff[c_dev].sum() / dff[c_pim].sum() * 100) if dff[c_pim].sum() > 0 else 0
-        fig3 = go.Figure(go.Indicator(
-            mode="gauge+number", value=perc, number={'suffix': "%", 'font':{'size':20, 'color':'white'}},
-            gauge={'bar':{'color':"#10b981"}, 'bgcolor':"#1e293b", 'axis':{'range':[0,100]}}
-        ))
-        fig3.update_layout(height=200, margin=dict(t=40,b=0,l=20,r=20), paper_bgcolor='rgba(0,0,0,0)')
-        st.markdown("<p style='text-align:center; font-size:12px;'>% DEVENGADO</p>", unsafe_allow_html=True)
-        st.plotly_chart(fig3, use_container_width=True)
+if gasto_filter == "INVERSIÓN":
+    filtered = filtered[filtered["GASTO"] == "Inversión"]
+elif gasto_filter == "GASTO CORRIENTE":
+    filtered = filtered[filtered["GASTO"] == "Gasto corriente"]
 
-    with g4: # Certificado %
-        perc_c = (dff[c_cert].sum() / dff[c_pim].sum() * 100) if dff[c_pim].sum() > 0 else 0
-        fig4 = go.Figure(go.Indicator(
-            mode="gauge+number", value=perc_c, number={'suffix': "%", 'font':{'size':20, 'color':'white'}},
-            gauge={'bar':{'color':"#06b6d4"}, 'bgcolor':"#1e293b", 'axis':{'range':[0,100]}}
-        ))
-        fig4.update_layout(height=200, margin=dict(t=40,b=0,l=20,r=20), paper_bgcolor='rgba(0,0,0,0)')
-        st.markdown("<p style='text-align:center; font-size:12px;'>% CERTIFICADO</p>", unsafe_allow_html=True)
-        st.plotly_chart(fig4, use_container_width=True)
+if ff_filter != "TODO":
+    filtered = filtered[filtered["FF"] == ff_filter]
 
-    # 4. GRÁFICO DE BARRAS MENSUAL
-    st.markdown("### PROGRAMACIÓN Y EJECUCIÓN MENSUAL 2026")
-    # Intentar buscar columnas de meses
-    meses_cols = [c for c in dff.columns if any(m in c for m in ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN'])]
-    if meses_cols:
-        df_meses = dff[meses_cols].sum().reset_index()
-        df_meses.columns = ['MES', 'MONTO']
-        fig_bar = px.bar(df_meses, x='MES', y='MONTO', color_discrete_sequence=['#3b82f6'])
-        fig_bar.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-        st.plotly_chart(fig_bar, use_container_width=True)
+# ---------------------------
+# KPIs
+# ---------------------------
+totals = {
+    "PIA": filtered["PIA"].sum(),
+    "PIM": filtered["PIM"].sum(),
+    "CERTIFICADO": filtered["CERTIFICADO"].sum(),
+    "COMPROMISO": filtered["COMPROMISO"].sum(),
+    "DEVENGADO": filtered["DEVENGADO"].sum(),
+    "TOTAL_PROG": filtered["TOTAL_PROG."].sum()
+}
 
-else:
-    st.warning("No se pudo cargar el archivo 'data.csv'. Asegúrate de que esté en la misma carpeta.")
+st.title("📊 REPORTE PVD — 2026")
+st.caption("Provías Descentralizado · Ejecución")
+
+kpi_cols = st.columns(6)
+
+for col, (k, v) in zip(kpi_cols, totals.items()):
+    col.metric(k, fmt(v), fmt_full(v))
+
+# ---------------------------
+# DONUTS
+# ---------------------------
+col1, col2 = st.columns(2)
+
+# Fuente
+pim_by_ff = filtered.groupby("FF")["PIM"].sum()
+
+fig_ff = go.Figure(data=[go.Pie(
+    labels=pim_by_ff.index,
+    values=pim_by_ff.values,
+    hole=0.6
+)])
+fig_ff.update_layout(title="Fuente de Financiamiento")
+
+col1.plotly_chart(fig_ff, use_container_width=True)
+
+# Tipo gasto
+pim_by_gasto = filtered.groupby("GASTO")["PIM"].sum()
+
+fig_gasto = go.Figure(data=[go.Pie(
+    labels=pim_by_gasto.index,
+    values=pim_by_gasto.values,
+    hole=0.6
+)])
+fig_gasto.update_layout(title="Tipo de Gasto")
+
+col2.plotly_chart(fig_gasto, use_container_width=True)
+
+# ---------------------------
+# GAUGES
+# ---------------------------
+col1, col2, col3 = st.columns(3)
+
+col1.plotly_chart(gauge(totals["DEVENGADO"], totals["PIM"], "Devengado", "#10b981"))
+col2.plotly_chart(gauge(totals["CERTIFICADO"], totals["PIM"], "Certificado", "#06b6d4"))
+col3.plotly_chart(gauge(totals["COMPROMISO"], totals["PIM"], "Compromiso", "#f59e0b"))
+
+# ---------------------------
+# BAR CHART
+# ---------------------------
+prog = []
+dev = []
+
+for m in MESES:
+    prog.append(filtered[f"PROG._{m}"].sum())
+    dev.append(filtered.get(f"DEV._{m}", 0).sum())
+
+fig_bar = go.Figure()
+fig_bar.add_bar(x=MESES, y=prog, name="Programado")
+fig_bar.add_bar(x=MESES, y=dev, name="Devengado")
+
+fig_bar.update_layout(
+    title="Programación vs Ejecución 2026",
+    barmode='group'
+)
+
+st.plotly_chart(fig_bar, use_container_width=True)
+
+# ---------------------------
+# TABLA
+# ---------------------------
+grouped = filtered.groupby(["NATURALEZA","GASTO"]).agg({
+    "PIM":"sum",
+    "CERTIFICADO":"sum",
+    "COMPROMISO":"sum",
+    "DEVENGADO":"sum"
+}).reset_index()
+
+grouped["% EJEC"] = np.where(
+    grouped["PIM"] > 0,
+    grouped["DEVENGADO"] / grouped["PIM"] * 100,
+    0
+)
+
+st.subheader("Ejecución por Línea")
+st.dataframe(grouped.sort_values("PIM", ascending=False), use_container_width=True)
